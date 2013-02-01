@@ -6,3 +6,4 @@ Other compression/packaging formats may be supported in the future.
 This module is based on Imagefield ZIP support (imagefield_zip) by mikeytown2.
 See http://drupal.org/project/imagefield_zip
 
+Rewritten by Mads
