@@ -1,0 +1,531 @@
+diff -up -r filefield_extract.info filefield_extract.info
+--- filefield_extract.info	2013-01-31 21:07:18.000000000 -0600
++++ filefield_extract.info	2013-01-31 14:09:11.000000000 -0600
+@@ -5,5 +5,5 @@ package = CCK
+ dependencies[] = filefield
+ dependencies[] = filefield_paths
+ 
+-core = "6.x"
++core = 7.x
+ 
+diff -up -r filefield_extract.install filefield_extract.install
+--- filefield_extract.install	2013-01-31 21:07:18.000000000 -0600
++++ filefield_extract.install	2013-01-31 14:09:11.000000000 -0600
+@@ -1,33 +1,35 @@
+-<?php
+-/**
+- * @file
+- * Install hook that adds variables to fields;
+- *
+- */
+-
+-/**
+- * Implementation of hook_install()
+- *
+- */
+-function filefield_extract_install() {
+-  $ret = array();
+-  $fields = module_invoke('content', 'fields');
+-
+-  if (count($fields)) {
+-    foreach ($fields as $field_name => $field_info) {
+-      // @TODO check for field type
+-      // disabled by default
+-      variable_set('filefield_extract_' . $field_info['field_name'] . '_status', '0');
+-    }
+-  }
+-
+-  return $ret;
+-}
+-
+-/**
+- * Implementation of hook_uninstall().
+- */
+-function filefield_extract_uninstall() {
+-  db_query("DELETE FROM {variable} WHERE name LIKE 'filefield_extract%'");
+-}
+-
++<?php
++/**
++ * @file
++ * Install hook that adds variables to fields;
++ *
++ */
++
++/**
++ * Implements hook_install().
++ *
++ */
++function filefield_extract_install() {
++  $ret = array();
++  $fields = module_invoke('content', 'fields');
++
++  if (count($fields)) {
++    foreach ($fields as $field_name => $field_info) {
++      // @TODO check for field type
++      // disabled by default
++      variable_set('filefield_extract_' . $field_info['field_name'] . '_status', '0');
++    }
++  }
++
++  return $ret;
++}
++
++/**
++ * Implements hook_uninstall().
++ */
++function filefield_extract_uninstall() {
++  // TODO Please review the conversion of this statement to the D7 database API syntax.
++  /* db_query("DELETE FROM {variable} WHERE name LIKE 'filefield_extract%'") */
++  db_delete('variable')->condition('name', 'filefield_extract%', 'LIKE')->execute();
++}
++
+diff -up -r filefield_extract.module filefield_extract.module
+--- filefield_extract.module	2013-01-31 21:07:18.000000000 -0600
++++ filefield_extract.module	2013-01-31 14:09:11.000000000 -0600
+@@ -1,223 +1,222 @@
+-<?php
+-
+-/**
+- * Implementation of hook_help().
+- */
+-function filefield_extract_help($path, $arg) {
+-  switch ($path) {
+-    case 'admin/help#filefield_extract' :
+-      $output =
+-         '<h2>' . t('About') . '</h2><p>' . 
+-         t('This module makes possible to automatically extract ZIP files stored in a CCK filefield.') . '<br />' . 
+-         t('Files will be extracted into the directory specified by the filefield path settings. They will not be included in the Drupal file table but they can be accessed and linked in the usual ways.') . 
+-         '</p>';
+-      return $output;
+-      break;
+-  }
+-}
+-
+-
+-/**
+- * Implementation of hook_perm().
+- */
+-function filefield_extract_perm() {
+-  return array('extract filefield archive');
+-}
+-
+-
+-/**
+- * Implementation of hook_form_alter().
+- */
+-function filefield_extract_form_alter(&$form, $form_state, $form_id) {
+-  // CCK field settings to enable/disable filefield ZIP support
+-  if (($form_id == 'content_field_edit_form') && !isset($form_state['change_basic']) ) {
+-     $field_name = $form['#field']['field_name'];
+-
+-     $form['field']['filefield_extract_enabled'] = array(
+-        '#type' => 'radios',
+-        '#title' => t('Enable extract archive support on this filefield'),
+-        '#default_value' => variable_get('filefield_extract_' . $field_name . '_status', FALSE),
+-        '#description' => t('When enabled, the uploaded files will be extracted on file upload completion. The files will be stored in the same directory where the original archive is stored.'),
+-        '#options' => array(
+-          FALSE => t('Disabled'),
+-          TRUE => t('Enabled'),
+-        ),
+-     );
+-     // Add custom submit handler to store user's choice
+-     $form['#submit'][] = 'filefield_extract_field_settings_submit';
+-  }
+-  // node form hook
+-  // display if node form, field processing enabled, user has access and the node is already saved.
+-  elseif (isset($form['type']) && isset($form['#node']) && $form['type']['#value'] .'_node_form' == $form_id && user_access('extract filefield archive') && $form['nid']['#value']) {
+-
+-     // get all filefields
+-     $filefields = filefield_get_field_list($form['type']['#value']);
+-     if (empty($filefields)) return;    // no extraction possible
+-
+-     $filefield_options = array();
+-     foreach ($filefields as $fieldname => $fielddata) {
+-       if (variable_get('filefield_extract_' . $fieldname . '_status', FALSE)) {
+-          $filefield_options[$fieldname] = $fielddata['widget']['label'];
+-       }
+-     }
+-     $form['filefield_extract_group'] = array(
+-        '#type' => 'fieldset',
+-        '#title' => t('Extract files from filefield archives'),
+-        '#collapsible' => TRUE,
+-        '#collapsed' => TRUE,
+-        '#weight' => 10,
+-     );
+-     $form['filefield_extract_group']['filefield_extract_info'] = array(
+-        '#type' => 'item',
+-        '#value' => t('The archives will be extracted in the following filefield.') . '<br />' . 
+-           t('Please note that depending on the size of the input the processing could take a long time.'),
+-      );
+-      if (!empty($filefield_options)) {
+-         $form['filefield_extract_group']['filefield_extract_src'] = array(
+-           '#type' => 'radios',
+-           '#title' => t('Extract packed content of the following filefield on node save'),
+-           '#description' => t('A valid ZIP file should already be stored in that field.'),
+-           '#default_value' => $form['filefield_extract_src'] ? $form['filefield_extract_src'] : '',
+-           '#options' => $filefield_options,
+-           );
+-     }
+-     else {
+-        $form['filefield_extract_group']['filefield_extract_notice'] = array(
+-          '#type' => 'item',
+-          '#value' => t('No fieldfields found where extracting enabled.') . '<br />' . 
+-             t('You can enable Filefield Zip Extract support on the field settings page.') . '<br />' . 
+-             l(t('Visit content field admin page'), 'admin/content/types/fields', array('attributes' => array('target' => '_blank'))),
+-        );
+-     }
+-
+-  }
+-}
+-
+-/**
+- * Custom submit handler for the content field edit form.
+- *
+- * @see cck_blocks_form_alter().
+- */
+-function filefield_extract_field_settings_submit($form, $form_state) {
+-  variable_set('filefield_extract_' . $form['#field']['field_name'] . '_status',
+-     $form_state['values']['filefield_extract_enabled']);
+-}
+-
+-
+-/**
+- * Extract uploaded archive files
+- * Implements hook_filefield_paths_process_file()
+- */
+-function filefield_extract_filefield_paths_process_file($new, $file, $settings, $node, $update) {
+-
+-  // check file is not empty and extract is active on the field
+-  if ($file['field'] && variable_get('filefield_extract_' . $file['name'] . '_status', FALSE) && !empty($node->filefield_extract_src) && ($node->filefield_extract_src == $file['name'])) {
+-
+-     if ($file['field']['filemime'] != 'application/zip') {
+-        drupal_set_message(t('Filefield extract: !filename is not a ZIP archive', array('!filename' => $filename)), 'warning');
+-        return;
+-     }
+-     $filename = $file['field']['filename'];
+-     $filepath = $file['field']['filepath'];
+-     $destdir = dirname($filepath);
+-     $extracted = filefield_extract_zip($filepath, $destdir);
+-     drupal_set_message(t('Extracted !num file(s) from !file to !dir.', array('!num' => $extracted, '!file' => $filename, '!dir' => $destdir)), 'warning');
+-  }
+-}
+-
+-/**
+- * Extracts the contents of an archive
+- *
+- * @param $filepath
+- *   Location of archive file.
+- */
+-function filefield_extract_zip($filepath, $destdir) {
+-  $extracted = 0;
+-
+-  if (!field_file_check_directory($destdir, FILE_CREATE_DIRECTORY)) {
+-     drupal_set_message(t('Could not create !destdir.', array('!destdir' => $destdir)), 'warning');
+-     return 0;  // no files extracted
+-  }
+-
+-  if ($z = zip_open($filepath)) {
+-    while ($entry = zip_read($z)) {
+-
+-      if (zip_entry_open($z, $entry, 'r') && ($zip_entry_filesize = zip_entry_filesize($entry))) {
+-
+-        $entry_name = zip_entry_name($entry);
+-
+-        // may contain characters with accents in non-utf8 format
+-        if (!_filefield_is_utf8($entry_name)) {
+-           $entry_name = iconv('CP850', 'utf8', zip_entry_name($entry));
+-        }
+-
+-        $entry_basename = basename($entry_name); // only the filename
+-        $entry_dir = ltrim(dirname($entry_name), '/.'); // only rel.dirname
+-
+-        $dest_fulldir = $destdir . '/' . $entry_dir; // full dir.name
+-        $entry_path = $dest_fulldir .'/' .  $entry_basename; // full path + name
+-        $entry_name = $entry_dir . '/' . $entry_basename; // rel. path + name
+-
+-        if (!field_file_check_directory($dest_fulldir, FILE_CREATE_DIRECTORY)) {
+-           drupal_set_message(t('Could not create !dest_fulldir - extracting to the base directory.', array('!dest_fulldir' => $dest_fulldir)), 'warning');
+-           $entry_path = $destdir .'/'. $entry_basename;
+-           $entry_name = $entry_basename;
+-        }
+-
+-        $data = zip_entry_read($entry, $zip_entry_filesize);
+-
+-        if (!file_save_data($data, $entry_path, FILE_EXISTS_REPLACE)) {
+-           drupal_set_message(t('Could not create !file.', array('!file' => $entry_name)), 'warning');
+-        }
+-        else {
+-           drupal_set_message(t('Extracted !file.', array('!file' => $entry_name)), 'warning');
+-           $extracted++;
+-        }
+-
+-        zip_entry_close($entry);
+-      }
+-    }
+-    zip_close($z);
+-  }
+-  return $extracted;
+-}
+-
+-
+-/**
+- * Module requirements
+- */
+-function filefield_extract_requirements($phase) {
+-  $requirements = array();
+-  $t = get_t();
+-
+-  $requirements['zip'] = array(
+-    'title' => $t('Filefield Extract Zip support'),
+-    'value' => function_exists('zip_open') ? $t('Available') : $t('Not available'),
+-  );
+-  if (function_exists('zip_open')) {
+-    $requirements['zip']['value'] = $t('Yes');
+-  }
+-  else {
+-    $requirements['zip']['description'] = $t('Zip support is required for %module_name to work. Visit the !link page to learn how to get zip support working.', array('%module_name' => 'filefield_extract', '!link' => '<a href="http://php.net/manual/en/zip.setup.php">PHP Zip setup</a>'));
+-    $requirements['zip']['value'] = $t('No');
+-    $requirements['zip']['severity'] = REQUIREMENT_ERROR;
+-  }
+-  return $requirements;
+-}
+-
+-/**
+- * Check string encoding
+- * @see http://w3.org/International/questions/qa-forms-utf-8.html
+- */
+-function _filefield_is_utf8($string) {
+-    return preg_match('%^(?:
+-          [\x09\x0A\x0D\x20-\x7E]            # ASCII
+-        | [\xC2-\xDF][\x80-\xBF]             # non-overlong 2-byte
+-        |  \xE0[\xA0-\xBF][\x80-\xBF]        # excluding overlongs
+-        | [\xE1-\xEC\xEE\xEF][\x80-\xBF]{2}  # straight 3-byte
+-        |  \xED[\x80-\x9F][\x80-\xBF]        # excluding surrogates
+-        |  \xF0[\x90-\xBF][\x80-\xBF]{2}     # planes 1-3
+-        | [\xF1-\xF3][\x80-\xBF]{3}          # planes 4-15
+-        |  \xF4[\x80-\x8F][\x80-\xBF]{2}     # plane 16
+-    )*$%xs', $string);
+-}
++<?php
++
++/**
++ * Implements hook_help().
++ */
++function filefield_extract_help($path, $arg) {
++  switch ($path) {
++    case 'admin/help#filefield_extract':
++      $output = '<h2>' . t('About') . '</h2><p>' . t('This module makes possible to automatically extract ZIP files stored in a CCK filefield.') . '<br />' . t('Files will be extracted into the directory specified by the filefield path settings. They will not be included in the Drupal file table but they can be accessed and linked in the usual ways.') . '</p>';
++      return $output;
++      break;
++  }
++}
++
++
++/**
++ * Implements hook_permission().
++ */
++function filefield_extract_permission() {
++  return array(
++    'extract filefield archive' => array(
++      'title' => t('extract filefield archive'),
++      'description' => t('TODO Add a description for \'extract filefield archive\''),
++    ),
++  );
++}
++
++
++/**
++ * Implements hook_form_alter().
++ */
++function filefield_extract_form_alter(&$form, $form_state, $form_id) {
++  // CCK field settings to enable/disable filefield ZIP support
++  if (($form_id == 'content_field_edit_form') && !isset($form_state['change_basic'])) {
++    $field_name = $form['#field']['field_name'];
++
++    $form['field']['filefield_extract_enabled'] = array(
++      '#type' => 'radios',
++      '#title' => t('Enable extract archive support on this filefield'),
++      '#default_value' => variable_get('filefield_extract_' . $field_name . '_status', FALSE),
++      '#description' => t('When enabled, the uploaded files will be extracted on file upload completion. The files will be stored in the same directory where the original archive is stored.'),
++      '#options' => array(
++        FALSE => t('Disabled'),
++        TRUE => t('Enabled'),
++      ),
++    );
++    // Add custom submit handler to store user's choice
++    $form['#submit'][] = 'filefield_extract_field_settings_submit';
++  }
++  // node form hook
++  // display if node form, field processing enabled, user has access and the node is already saved.
++  elseif (!empty($form['#node_edit_form']) && user_access('extract filefield archive') && $form['nid']['#value']) {
++
++    // get all filefields
++    $filefields = filefield_get_field_list($form['type']['#value']);
++    if (empty($filefields)) {
++      return; // no extraction possible
++    }
++
++    $filefield_options = array();
++    foreach ($filefields as $fieldname => $fielddata) {
++      if (variable_get('filefield_extract_' . $fieldname . '_status', FALSE)) {
++        $filefield_options[$fieldname] = $fielddata['widget']['label'];
++      }
++    }
++    $form['filefield_extract_group'] = array(
++      '#type' => 'fieldset',
++      '#title' => t('Extract files from filefield archives'),
++      '#collapsible' => TRUE,
++      '#collapsed' => TRUE,
++      '#weight' => 10,
++    );
++    $form['filefield_extract_group']['filefield_extract_info'] = array(
++      '#type' => 'item',
++      '#value' => t('The archives will be extracted in the following filefield.') . '<br />' . t('Please note that depending on the size of the input the processing could take a long time.'),
++    );
++    if (!empty($filefield_options)) {
++      $form['filefield_extract_group']['filefield_extract_src'] = array(
++        '#type' => 'radios',
++        '#title' => t('Extract packed content of the following filefield on node save'),
++        '#description' => t('A valid ZIP file should already be stored in that field.'),
++        '#default_value' => $form['filefield_extract_src'] ? $form['filefield_extract_src'] : '',
++        '#options' => $filefield_options,
++      );
++    }
++    else {
++      $form['filefield_extract_group']['filefield_extract_notice'] = array(
++        '#type' => 'item',
++        '#value' => t('No fieldfields found where extracting enabled.') . '<br />' . t('You can enable Filefield Zip Extract support on the field settings page.') . '<br />' . l(t('Visit content field admin page'), 'admin/structure/types/fields', array('attributes' => array('target' => '_blank'))),
++      );
++    }
++
++  }
++}
++
++/**
++ * Custom submit handler for the content field edit form.
++ *
++ * @see cck_blocks_form_alter().
++ */
++function filefield_extract_field_settings_submit($form, $form_state) {
++  variable_set('filefield_extract_' . $form['#field']['field_name'] . '_status', $form_state['values']['filefield_extract_enabled']);
++}
++
++
++/**
++ * Extract uploaded archive files
++ * Implements hook_filefield_paths_process_file().
++ */
++function filefield_extract_filefield_paths_process_file($new, $file, $settings, $node, $update) {
++
++  // check file is not empty and extract is active on the field
++  if ($file['field'] && variable_get('filefield_extract_' . $file['name'] . '_status', FALSE) && !empty($node->filefield_extract_src) && ($node->filefield_extract_src == $file['name'])) {
++
++    if ($file['field']['filemime'] != 'application/zip') {
++      drupal_set_message(t('Filefield extract: !filename is not a ZIP archive', array('!filename' => $filename)), 'warning');
++      return;
++    }
++    $filename = $file['field']['filename'];
++    $filepath = $file['field']['filepath'];
++    $destdir = dirname($filepath);
++    $extracted = filefield_extract_zip($filepath, $destdir);
++    drupal_set_message(t('Extracted !num file(s) from !file to !dir.', array('!num' => $extracted, '!file' => $filename, '!dir' => $destdir)), 'warning');
++  }
++}
++
++/**
++ * Extracts the contents of an archive
++ *
++ * @param $filepath
++ *   Location of archive file.
++ */
++function filefield_extract_zip($filepath, $destdir) {
++  $extracted = 0;
++
++  if (!field_file_check_directory($destdir, FILE_CREATE_DIRECTORY)) {
++    drupal_set_message(t('Could not create !destdir.', array('!destdir' => $destdir)), 'warning');
++    return 0; // no files extracted
++  }
++
++  if ($z = zip_open($filepath)) {
++    while ($entry = zip_read($z)) {
++
++      if (zip_entry_open($z, $entry, 'r') && ($zip_entry_filesize = zip_entry_filesize($entry))) {
++
++        $entry_name = zip_entry_name($entry);
++
++        // may contain characters with accents in non-utf8 format
++        if (!_filefield_is_utf8($entry_name)) {
++          $entry_name = iconv('CP850', 'utf8', zip_entry_name($entry));
++        }
++
++        $entry_basename = basename($entry_name); // only the filename
++        $entry_dir = ltrim(dirname($entry_name), '/.'); // only rel.dirname
++
++        $dest_fulldir = $destdir . '/' . $entry_dir; // full dir.name
++        $entry_path = $dest_fulldir . '/' . $entry_basename; // full path + name
++        $entry_name = $entry_dir . '/' . $entry_basename; // rel. path + name
++
++        if (!field_file_check_directory($dest_fulldir, FILE_CREATE_DIRECTORY)) {
++          drupal_set_message(t('Could not create !dest_fulldir - extracting to the base directory.', array('!dest_fulldir' => $dest_fulldir)), 'warning');
++          $entry_path = $destdir . '/' . $entry_basename;
++          $entry_name = $entry_basename;
++        }
++
++        $data = zip_entry_read($entry, $zip_entry_filesize);
++
++        if (!file_save_data($data, $entry_path, FILE_EXISTS_REPLACE)) {
++          drupal_set_message(t('Could not create !file.', array('!file' => $entry_name)), 'warning');
++        }
++        else {
++          drupal_set_message(t('Extracted !file.', array('!file' => $entry_name)), 'warning');
++          $extracted++;
++        }
++
++        zip_entry_close($entry);
++      }
++    }
++    zip_close($z);
++  }
++  return $extracted;
++}
++
++
++/**
++ * Module requirements
++ */
++function filefield_extract_requirements($phase) {
++  $requirements = array();
++  $t = get_t();
++
++  $requirements['zip'] = array(
++    'title' => $t('Filefield Extract Zip support'),
++    'value' => function_exists('zip_open') ? $t('Available') : $t('Not available'),
++  );
++  if (function_exists('zip_open')) {
++    $requirements['zip']['value'] = $t('Yes');
++  }
++  else {
++    $requirements['zip']['description'] = $t('Zip support is required for %module_name to work. Visit the !link page to learn how to get zip support working.', array('%module_name' => 'filefield_extract', '!link' => '<a href="http://php.net/manual/en/zip.setup.php">PHP Zip setup</a>'));
++    $requirements['zip']['value'] = $t('No');
++    $requirements['zip']['severity'] = REQUIREMENT_ERROR;
++  }
++  return $requirements;
++}
++
++/**
++ * Check string encoding
++ * @see http://w3.org/International/questions/qa-forms-utf-8.html
++ */
++function _filefield_is_utf8($string) {
++  return preg_match('%^(?:
++          [\x09\x0A\x0D\x20-\x7E]            # ASCII
++        | [\xC2-\xDF][\x80-\xBF]             # non-overlong 2-byte
++        |  \xE0[\xA0-\xBF][\x80-\xBF]        # excluding overlongs
++        | [\xE1-\xEC\xEE\xEF][\x80-\xBF]{2}  # straight 3-byte
++        |  \xED[\x80-\x9F][\x80-\xBF]        # excluding surrogates
++        |  \xF0[\x90-\xBF][\x80-\xBF]{2}     # planes 1-3
++        | [\xF1-\xF3][\x80-\xBF]{3}          # planes 4-15
++        |  \xF4[\x80-\x8F][\x80-\xBF]{2}     # plane 16
++    )*$%xs', $string);
++}

@@ -1,0 +1,4 @@
+FileField Extract 6.x-1.x
+-------------------------
+
+Initial release

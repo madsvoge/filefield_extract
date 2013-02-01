@@ -1,0 +1,7 @@
+name = FileField Extract
+description = "Extract an archive uploaded to a filefield."
+
+dependencies[] = filefield_paths
+
+core = 7.x
+
